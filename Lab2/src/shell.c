@@ -51,6 +51,17 @@ void redirection(struct cmd_node *p){
         }
         close(fd);  // Close the file descriptor
     }
+    
+    
+    // Handle input/output redirection with pipes
+    if (p -> in != STDIN_FILENO) {
+        dup2(p -> in, STDIN_FILENO);
+        close(p -> in);
+    }
+    if (p -> out != STDOUT_FILENO) {
+        dup2(p -> out, STDOUT_FILENO);
+        close(p -> out);
+    }
 
 }
 // ===============================================================
@@ -87,7 +98,7 @@ int spawn_proc(struct cmd_node *p)
         
 	// Fork failed
         perror("fork failed");
-     	return 1;
+     	return -1;
 
     } else {
 
@@ -96,14 +107,14 @@ int spawn_proc(struct cmd_node *p)
 	
         if (waitpid(pid, &status, 0) == -1) {
             perror("waitpid failed");
-            return 1;
+            return -1;
         }
 
         // Check if the child process terminated normally
         if (WIFEXITED(status)) {
             return WEXITSTATUS(status);  // Return the exit status of the child
         } else {
-            return 1;  // if the child did not terminate normally
+            return -1;  // if the child did not terminate normally
         }
     }
     
@@ -122,28 +133,66 @@ int spawn_proc(struct cmd_node *p)
  * Return execution status 
  */
 int fork_cmd_node(struct cmd *cmd)
-{/*
-        // Handle input/output redirection with pipes
-    if (p -> in != -1) {
-        // Redirect stdin to the pipe's input
-        if (dup2(p -> in, STDIN_FILENO) == -1) {
-            perror("dup2 for pipe input redirection failed");
-            exit(EXIT_FAILURE);
-        }
-        close(p -> in);  // Close the pipe's input file descriptor
+{
+    int cmd_num = 0;
+    struct cmd_node *current = cmd -> head;
+
+    // Count the number of commands
+    while (current) {
+        cmd_num++;
+        current = current->next;
     }
 
-    if (p -> out != -1) {
-        // Redirect stdout to the pipe's output
-        if (dup2(p -> out, STDOUT_FILENO) == -1) {
-            perror("dup2 for pipe output redirection failed");
-            exit(EXIT_FAILURE);
+    // Create pipes for all but the last command
+    int pipe_fds[2 * (cmd_num - 1)];  
+    for (int i = 0; i < cmd_num - 1; i++) {
+        if (pipe(pipe_fds + i * 2) < 0) {
+            perror("pipe failed");
+            return -1;
         }
-        close(p -> out);  // Close the pipe's output file descriptor
-    }*/
+    }
 
-    return 1;
+    current = cmd -> head;
+    for (int i = 0; i < cmd_num; i++) {
+        pid_t pid = fork();
+        if (pid == 0) {  // Child process
+            // If not the first command, get input from the previous pipe
+            if (i > 0) {
+                dup2(pipe_fds[(i - 1) * 2], STDIN_FILENO);
+            }
+            // If not the last command, output to the next pipe
+            if (i < cmd_num - 1) {
+                dup2(pipe_fds[i * 2 + 1], STDOUT_FILENO);
+            }
+            // Close all pipe file descriptors in the child process
+            for (int j = 0; j < 2 * (cmd_num - 1); j++) {
+                close(pipe_fds[j]);
+            }
+            redirection(current);  // Apply any redirection for the command
+            execvp(current -> args[0], current -> args);
+            perror("execvp failed");
+            exit(EXIT_FAILURE);
+        } else if (pid < 0) {  // Fork failed
+            perror("fork failed");
+            return -1;
+        }
+        current = current -> next;
+    }
+
+    // Close all pipe file descriptors in the parent process
+    for (int i = 0; i < 2 * (cmd_num - 1); i++) {
+        close(pipe_fds[i]);
+    }
+
+    // Wait for all child processes to finish
+    for (int i = 0; i < cmd_num; i++) {
+        int status;
+        wait(&status);
+    }
+
+    return 0;  // All commands executed successfully 
 }
+
 // ===============================================================
 
 
