@@ -22,7 +22,7 @@
 void redirection(struct cmd_node *p){
     int fd;
 
-    // Handle input redirection ("<")
+    // Handle input redirection (<)
     if (p -> in_file != NULL) {
         fd = open(p -> in_file, O_RDONLY);  // Open the input file
         if (fd == -1) {
@@ -37,7 +37,7 @@ void redirection(struct cmd_node *p){
         close(fd);  // Close the file descriptor
     }
 
-    // Handle output redirection (">")
+    // Handle output redirection (>)
     if (p -> out_file != NULL) {
         fd = open(p -> out_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);  // Open/create output file
         if (fd == -1) {
@@ -140,7 +140,9 @@ int fork_cmd_node(struct cmd *cmd)
     // Count the number of commands
     while (current) {
         cmd_num++;
-        current = current->next;
+        current -> in = 0;
+        current -> out = 1;
+        current = current -> next;
     }
 
     // Create pipes for all but the last command
@@ -159,7 +161,7 @@ int fork_cmd_node(struct cmd *cmd)
             // If not the first command, get input from the previous pipe
             if (i > 0) {
                 dup2(pipe_fds[(i - 1) * 2], STDIN_FILENO);
-            }
+            } 
             // If not the last command, output to the next pipe
             if (i < cmd_num - 1) {
                 dup2(pipe_fds[i * 2 + 1], STDOUT_FILENO);
@@ -167,11 +169,13 @@ int fork_cmd_node(struct cmd *cmd)
             // Close all pipe file descriptors in the child process
             for (int j = 0; j < 2 * (cmd_num - 1); j++) {
                 close(pipe_fds[j]);
+                
             }
             redirection(current);  // Apply any redirection for the command
-            execvp(current -> args[0], current -> args);
-            perror("execvp failed");
-            exit(EXIT_FAILURE);
+            if(execvp(current -> args[0], current -> args) == -1){
+                perror("execvp failed");
+                exit(EXIT_FAILURE);
+	    }
         } else if (pid < 0) {  // Fork failed
             perror("fork failed");
             return -1;
@@ -248,7 +252,7 @@ void shell()
 		free(cmd);
 		free(buffer);
 		
-		//if (status == 0)
+		//if (status == 0)break;
 		//a little change here only when status == -1 or user input "exit" will terminate the code
 	        if (status == -1 && strcmp(temp->args[0], "exit") == 0)break;
 			
